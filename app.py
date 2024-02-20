@@ -10,29 +10,29 @@ from celery.result import AsyncResult
 
 from face_checker import FaceChecker
 
-
-
 app_name = 'app'
 app = Flask(app_name)
 app.config['UPLOAD_FOLDER'] = 'files'
 celery = Celery(
-    app_name,
+    'app_name',
     backend='redis://localhost:6379/3',
-    broker='redis://localhost:6379/4'
+    broker='redis://localhost:6379/4',
+    broker_connection_retry_on_startup=True
 )
 celery.conf.update(app.config)
+
 
 class ContextTask(celery.Task):
     def __call__(self, *args, **kwargs):
         with app.app_context():
             return self.run(*args, **kwargs)
 
-celery.Task = ContextTask
+
+celery.Task = ContextTask  # Нужно чтобы celery нормально работал с Flask`ом
 
 
 @celery.task()
 def match_photos(path_1, path_2):
-
     result = FaceChecker.with_files().match(path_1, path_2)
     return result
 
@@ -43,6 +43,7 @@ class Comparison(MethodView):
         task = AsyncResult(task_id, app=celery)
         return jsonify({'status': task.status,
                         'result': task.result})
+
     def post(self):
         image_pathes = [self.save_image(field) for field in ('image_1', 'image_2')]
         task = match_photos.delay(*image_pathes)
@@ -61,7 +62,6 @@ class Comparison(MethodView):
 comparison_view = Comparison.as_view('comparison')
 app.add_url_rule('/comparison/<string:task_id>', view_func=comparison_view, methods=['GET'])
 app.add_url_rule('/comparison/', view_func=comparison_view, methods=['POST'])
-
 
 if __name__ == '__main__':
     app.run()
